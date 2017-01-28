@@ -1,13 +1,13 @@
 import collections
 import itertools
 import numpy as np
-from pylab import pcolormesh, colorbar
+import pylab as plt
 
 def _gaussian(xs, a, b, c):
     f = a*np.exp(-((xs-b)**2) / (2 * (c**2)))
     return f
 
-def _gaussian_multD(xs, x0s, height=1, widths=1):
+def _gaussian_multD(xs, x0s, height=1, widths=1, normed=False):
     # check dim of a
     if isinstance(height, collections.Iterable):
         raise
@@ -21,7 +21,7 @@ def _gaussian_multD(xs, x0s, height=1, widths=1):
             x0s = np.array([x0s for i in range(x_shape[0])])
     # check dim of c
     if isinstance(widths, collections.Iterable):
-        if len(width) != len(xs):
+        if len(widths) != len(xs):
             raise
     else:
         x_shape = xs.shape
@@ -33,6 +33,8 @@ def _gaussian_multD(xs, x0s, height=1, widths=1):
             ((xs[num] - x0s[num])**2) / (2 * (widths[num]**2))
             for num in range(len(xs))],
         axis=0)
+    if normed:
+        height = np.prod(1/(((2*np.pi)**0.5)*np.array(widths)))*height
     f = height*np.exp(-exponent)
     return f
 
@@ -56,12 +58,12 @@ def gaussian_noise(
     # heights
     height_spread = height_range[1] - height_range[0]
     heights = [
-        height_spread * np.random.random() - height_range[1]
+        height_spread * np.random.random() + height_range[0]
         for n in range(gaussians_per_axis**2)]
     # widths
     widths_spread = width_range[1] - width_range[0]
     widths = [
-        widths_spread * np.random.random() - width_range[1]
+        widths_spread * np.random.random() + width_range[0]
         for n in range(gaussians_per_axis**2)]
     # rigid formula and initialize noise and xs
     rigidity_div = 2 + (rigidity*4)**2
@@ -136,10 +138,39 @@ def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     T /= T.sum(axis=1)[:,None]
     return T
 
+def funneled_landscape(grid_size, width_frac=0.707, depth=1, resolution=1):
+    l = landscape(grid_size=grid_size, resolution=resolution)
+    x0 = np.array([grid_size[0], grid_size[1]])
+    widths = x0*width_frac
+    l = l.add_gaussian(x0, height=-depth, widths=widths)
+    return l
+
+def diagonal_barrier(
+        grid_size, position=0.5, height=1, width=1, resolution=1):
+    l = landscape(grid_size=grid_size, resolution=resolution)
+    semi_circum = len(l.x1_coords)+len(l.x1_coords[0]) - 1
+    diag = int(semi_circum * position) - len(l.x1_coords)
+    centers = np.array(
+        list(
+            zip(
+                l.x1_coords[::-1].diagonal(diag),
+                l.x2_coords[::-1].diagonal(diag))))
+    for center in centers:
+        l = l.add_gaussian(x0s=center, height=height, widths=width)
+    return l
+
+def egg_carton_landscape(
+        grid_size, gaussians_per_axis, height=1, width=1, resolution=1):
+    l = landscape(grid_size=grid_size, resolution=resolution)
+    l = l.add_noise(
+        gaussians_per_axis=gaussians_per_axis, height_range=[height, height],
+        width_range=[width, width], rigidity=100000)
+    return l
+
 class landscape:
     def __init__(
-            self, x1_coords=None, x2_coords=None, values=None,
-            grid_size=None, resolution=10):
+            self, grid_size,  x1_coords=None, x2_coords=None, values=None,
+            resolution=1):
         if (x1_coords is None) and (x2_coords is None) and (values is None):
             if (grid_size is None):
                 print("Need to specify a grid_size")
@@ -161,11 +192,11 @@ class landscape:
             self.values = values
     def add_gaussian(self, x0s, height=1, widths=1):
         input_coords = np.array([self.x1_coords, self.x2_coords])
-        new_values = _gaussian_multD(
+        new_values = self.values + _gaussian_multD(
             input_coords, x0s, height=height, widths=widths)
         return landscape(
-            x1_coords=self.x1_coords, x2_coords=self.x2_coords,
-            values=new_values)
+            grid_size=self.grid_size, x1_coords=self.x1_coords,
+            x2_coords=self.x2_coords, values=new_values)
     def add_noise(
             self, gaussians_per_axis, height_range=[-0.1, 0.1],
             width_range=[0.85, 1.15], rigidity=0):
@@ -174,15 +205,18 @@ class landscape:
             gaussians_per_axis = gaussians_per_axis, height_range = height_range,
             width_range = width_range, rigidity = rigidity)
         return landscape(
-            x1_coords=self.x1_coords, x2_coords=self.x2_coords,
-            values=self.values+noise)
-    def color_plot(self):
-        pcolormesh(self.x1_coords, self.x2_coords, self.values)
-        colorbar()
+            grid_size=self.grid_size, x1_coords=self.x1_coords,
+            x2_coords=self.x2_coords, values=self.values+noise)
+    def plot(self, title='potential energy landscape'):
+        plt.figure(title)
+        plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
+        plt.ylim((self.x2_coords[0,0], self.x2_coords[-1,0]))
+        plt.pcolormesh(self.x1_coords, self.x2_coords, self.values)
+        plt.colorbar()
+        plt.show()
         return
     def to_probs(self):
         T = surface_to_probs(
             self.x1_coords, self.x2_coords, self.values, self.grid_size)
         return T
-
 
