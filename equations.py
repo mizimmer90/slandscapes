@@ -102,3 +102,25 @@ def calc_discover_probs(
         P_alphas = calc_state_sel_probs(discover_probs, alphas)
         discover_probs = (1 - ((1 - discover_probs) * np.matmul(P_alphas, (1-base_probs))))
     return discover_probs
+
+def MC_reactive_pathways(assignments, sinks):
+    sinks = np.array(sinks).reshape((-1,))
+    reactive_pathways = np.array(
+        [_get_reactive_path(assignment, sinks) for assignment in assignments])
+    # trim empty pathways
+    reactive_pathways = reactive_pathways[np.where(reactive_pathways)]
+    if verbose:
+        print(
+            "%d reactive trajectories out of %d" % \
+            (len(reactive_pathways), len(assignments)))
+    return reactive_pathways
+
+def MC_reactive_density(assignments, sinks, verbose=False):
+    reactive_densities = np.array(
+        np.bincount(np.concatenate(reactive_pathways)))
+    reactive_densities = reactive_densities / np.sum(reactive_densities)
+    return reactive_densities
+
+def MC_state_pathway_prob(assignments, sinks, verbose=False):
+    reactive_pathways = np.array(
+        [np.unique(pathway) for pathway in reactive_pathways])

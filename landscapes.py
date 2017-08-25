@@ -1,7 +1,73 @@
 import collections
+import glob
 import itertools
 import numpy as np
+import os
 import pylab as plt
+from mdtraj import io
+
+#################################################
+#            format tpt path to grid            #
+#################################################
+
+def _convert_path(path, n_states):
+    dim = int(np.sqrt(n_states))
+    shape = (dim, dim)
+    states_shape = np.arange(n_states).reshape(shape)
+    xy = np.array(
+        [(np.concatenate(np.where(states_shape==state))) for state in path]).T
+    return xy[::-1]
+
+
+def convert_paths(paths, n_states):
+    xys = []
+    for path in paths:
+        xy = _convert_path(path, n_states)
+        xys.append(xy)
+    return xys
+
+
+def format_line(array):
+    return " ".join([str(i) for i in array])
+
+
+def format_flux_paths(fluxes, paths, n_states):
+    xys = convert_paths(paths, n_states)
+    if len(fluxes) != len(paths):
+       raise
+    output_data = ""
+    for num in range(len(xys)):
+        output_line = str(fluxes[num])+"\n"+\
+            format_line(xys[num][0])+"\n"+\
+            format_line(xys[num][1])+"\n"
+        output_data += output_line
+    return output_data
+
+
+def plot_pijs(filenames, grid_size=None, output_names=None, state_num=None):
+    if isinstance(filenames, collections.Iterable) and not \
+            isinstance(filenames, (str, bytes)):
+        filenames = filenames
+    else:
+        filenames = glob.glob(filenames)
+    data = [np.load(filename) for filename in filenames]
+    if grid_size is None:
+        grid_edge = np.sqrt(len(data[0]))
+        grid_size = (grid_edge, grid_edge)
+    X,Y = np.meshgrid(
+        np.arange(grid_size[0]), np.arange(grid_size[1]))
+    for num in range(len(filenames)):
+        plt.figure(filenames[num])
+        if state_num is None:
+            plot_data = data[num].reshape(grid_size)
+        else:
+            plot_data = data[num][state_num].reshape(grid_size)
+        plt.pcolormesh(X, Y, plot_data, vmin=0, vmax=1)
+        plt.colorbar()
+        if output_names is not None:
+            plt.savefig(output_names[num])
+    plt.show()
+    return
 
 def _gaussian(xs, a, b, c):
     f = a*np.exp(-((xs-b)**2) / (2 * (c**2)))
@@ -80,11 +146,38 @@ def gaussian_noise(
             xs, center, height=heights[num], widths=widths[num])
     return noise
 
+def energies_to_probs(Aij, energies):
+    """Given an adjacency matrix and a list of state energies,
+    returns the corresponding transition probability matrix.
+    """
+    # test shape of Aij
+    fd,sd = Aij.shape
+    if fd != sd:
+        print("Aij is not square!")
+        raise
+    # test values of Aij
+    if len(np.where((Aij != 0)*(Aij != 1))[0]) > 0:
+        print("Aij has elements that are not 0 or 1...")
+        raise
+    # initialize probs
+    probs = np.zeros(Aij.shape)
+    for state in range(len(probs)):
+        # find where there is a defined transition in Aij
+        transitions = np.where(Aij[state] == 1)[0]
+        # calculates rate = min[1, e^(U1-U2)]
+        rates = np.minimum(
+            np.ones(len(transitions)),
+            np.exp(energies[state] - energies[transitions]))
+        probs[state,transitions] = rates
+    # norms the rates into transition probs
+    probs = probs/probs.sum(axis=1)[:,None]
+    return probs
+
 def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     """given a potential energy landscape (in the form of values for x1,
        x2, and f(x1,x2) and a connectivity grid size) returns the transition
        probability matrix that corresponds to that surface. Looks for the
-       highed energy between adjacent states and uses the arrhenius equation
+       highest energy between adjacent states and uses the arrhenius equation
        to generate a rate. Potential energy surface is in units of kT."""
     # identify number of states and resolution (points between states)
     n_states = grid_size[0]*grid_size[1]
@@ -99,9 +192,12 @@ def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     # Get transitions between columns on the grid
     for col in range(len(states[0])-1):
         # determine the maximum energy between column-adjacent states
+        # by taking the maximum energy, we don't need to employ the
+        # metropolis min criterion, since the maximum could be the state
+        # in question (i.e. the rate will never be less than 1)
         surface_slice = surface[
-                res_adjust::res,
-                (res_adjust + col*res):((col + 1)*res + 1 + res_adjust)]
+            res_adjust::res,
+            (res_adjust + col*res):((col + 1)*res + 1 + res_adjust)]
         max_energy = np.max(surface_slice, axis=1)
         energy_diffs_1 = max_energy - surface_slice[:,0] 
         energy_diffs_2 = max_energy - surface_slice[:,-1]
@@ -118,8 +214,8 @@ def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     for row in range(len(states)-1):
         # determine the maximum energy between row-adjacent states
         surface_slice = surface[
-                (res_adjust + row*res):((row + 1)*res + 1 + res_adjust),
-                res_adjust::res]
+            (res_adjust + row*res):((row + 1)*res + 1 + res_adjust),
+            res_adjust::res]
         max_energy = np.max(surface_slice, axis=0)
         energy_diffs_1 = max_energy - surface_slice[0, :]
         energy_diffs_2 = max_energy - surface_slice[-1, :]
@@ -167,9 +263,16 @@ def egg_carton_landscape(
         width_range=[width, width], rigidity=100000)
     return l
 
+def slant_landscape(
+        grid_size, gradient=1.0, resolution=1):
+    l = landscape(grid_size=grid_size, resolution=resolution)
+    l.values = np.array(
+        [np.arange(l.values.shape[1]) * gradient] * l.values.shape[0])
+    return l
+
 class landscape:
     def __init__(
-            self, grid_size,  x1_coords=None, x2_coords=None, values=None,
+            self, grid_size=None,  x1_coords=None, x2_coords=None, values=None,
             resolution=1):
         if (x1_coords is None) and (x2_coords is None) and (values is None):
             if (grid_size is None):
@@ -207,16 +310,50 @@ class landscape:
         return landscape(
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=self.values+noise)
-    def plot(self, title='potential energy landscape'):
+    def plot(self, title='potential energy landscape', **kwargs):
+        plt.figure(title)
+        plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
+        plt.ylim((self.x2_coords[0,0], self.x2_coords[-1,0]))
+        plt.pcolormesh(self.x1_coords, self.x2_coords, self.values, **kwargs)
+        plt.colorbar()
+        plt.show()
+        return
+    def save_fig(self, output_name, title='potential energy landscape'):
         plt.figure(title)
         plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
         plt.ylim((self.x2_coords[0,0], self.x2_coords[-1,0]))
         plt.pcolormesh(self.x1_coords, self.x2_coords, self.values)
         plt.colorbar()
+        plt.savefig(output_name)
         plt.show()
-        return
     def to_probs(self):
         T = surface_to_probs(
             self.x1_coords, self.x2_coords, self.values, self.grid_size)
         return T
+    def save(self, output_name, txt=False, txt_fmt='%d %d %d %f'):
+        if txt:
+            x1_coords_flat = self.x1_coords.flatten()
+            x2_coords_flat = self.x2_coords.flatten()
+            values_flat = self.values.flatten()
+            states = np.arange(len(x1_coords_flat))
+            output_data = np.array(
+                list(
+                    zip(states, x1_coords_flat, x2_coords_flat, values_flat)))
+            np.savetxt(
+                output_name, output_data, fmt=txt_fmt,
+                header='state x1 x2 energy')
+        else:
+            output_dict = {
+                'x1_coords' : self.x1_coords,
+                'x2_coords' : self.x2_coords,
+                'landscape' : self.values}
+            io.saveh(output_name, **output_dict)
+    def load(input_name):
+        load_dict = io.loadh(input_name)
+        x1_coords = load_dict['x1_coords']
+        x2_coords = load_dict['x2_coords']
+        values = load_dict['landscape']
+        return landscape(
+            x1_coords=x1_coords, x2_coords=x2_coords, values=values)
+
 
