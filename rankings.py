@@ -2,6 +2,9 @@ import numpy as np
 from . import scalings
 
 def _evens_select_states(msm, n_clones):
+    """Helper function for evens state selection. Picks among all
+    discovered states evenly. If more states were discovered than
+    clones, randomly picks remainder states."""
     # determine discovered states from msm
     counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
     unique_states = np.where(counts_per_state > 0)[0]
@@ -19,6 +22,9 @@ def _evens_select_states(msm, n_clones):
 
 
 def _unbias_state_selection(states, rankings, n_selections, select_max=True):
+    """Unbiases state selection due to state labeling. Shuffles states
+    with equivalent rankings so that state index does not influence
+    selection probability."""
     # determine the unique ranking values
     unique_rankings = np.unique(rankings)
     # sort states and rankings
@@ -43,12 +49,16 @@ def _unbias_state_selection(states, rankings, n_selections, select_max=True):
 
 
 def counts_ranking(msm):
+    """Counts ranking. Input is an enspara msm object that has already
+    been fit with assignments. Returns the unique states and counts per
+    unique state."""
     counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
     unique_states = np.where(counts_per_state > 0)[0]
     return unique_states, counts_per_state[unique_states]
 
 
 class evens:
+    """Evens ranking object"""
     def __init__(self):
         pass
 
@@ -57,6 +67,7 @@ class evens:
 
 
 class min_counts:
+    """Min-counts ranking object"""
     def __init__(self):
         pass
 
@@ -75,12 +86,35 @@ class min_counts:
 
 
 class FAST:
+    """FAST ranking object"""
+
     def __init__(
             self, state_rankings,
             directed_scaling = scalings.feature_scale(maximize=True),
             statistical_component = counts_ranking,
             statistical_scaling = scalings.feature_scale(maximize=False),
             alpha = 1, alpha_percent=False):
+        """
+        Parameters
+        ----------
+        state_rankings : array, shape = (n_states, )
+            An array with ranking values for each state. This is
+            previously calculated for each state in the MSM.
+        directed_scaling : scaling object, default = feature_scale(maximize=True)
+            An object used for scaling the directed component values.
+        statistical_component : ranking function
+            A function that has an enspara msm object as input, and
+            returns the unique states and statistical rankings per
+            state.
+        statistical_scaling : scaling object, default = feature_scale(maximize=False)
+            An object used for scaling the statistical component values.
+        alpha : float, default = 1
+            The weighting of the statistical component to FAST.
+            i.e. r_i = directed + alpha * undirected
+        alpha_percent : bool, default=False
+            Optionally treat the alpha value as a percent.
+            i.e. r_i = (1 - alpha) * directed + alpha * undirected
+        """
         self.state_rankings = state_rankings
         self.directed_scaling = directed_scaling
         self.statistical_component = statistical_component
@@ -90,22 +124,26 @@ class FAST:
         if self.alpha_percent and ((self.alpha < 0) or (self.alpha > 1)):
             raise
 
-
     def select_states(self, msm, n_clones):
+        # get the unique states and statistical rankings
         unique_states, statistical_ranking = self.statistical_component(msm)
         if len(unique_states) < n_clones:
             states_to_simulate = _evens_select_states(msm, n_clones)
         # selects the n_clones with minimum counts
         else:
+            # scale the directed weights
             directed_weights = self.directed_scaling.scale(
                 self.state_rankings[unique_states])
+            # scale the statistical weights
             statistical_weights = self.statistical_scaling.scale(
                 statistical_ranking)
+            # determine rankings
             if self.alpha_percent:
                 total_rankings = (1-self.alpha)*directed_weights + \
                     self.alpha*statistical_weights
             else:
                 total_rankings = directed_weights + self.alpha*statistical_weights
+            # unbias state selection
             states_to_simulate = _unbias_state_selection(
                 unique_states, total_rankings, n_clones, select_max=True)
         return states_to_simulate

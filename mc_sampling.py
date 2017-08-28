@@ -6,6 +6,7 @@ from multiprocessing import Pool
 
 
 def _run_sampling(adaptive_sampling_obj):
+    """Helper to adaptive sampling. Helps parallelize sampling runs."""
     assignments = adaptive_sampling_obj[0].run()
     return assignments
 
@@ -65,9 +66,38 @@ def adaptive_sampling(
 
 
 class Adaptive_Sampling:
+    """Adaptive sampling object. Runs a single adaptive sampling run.
+
+    Parameters
+    ----------
+    T : array, shape=(n_states, n_states)
+        The transition probability matrix from which to sample.
+    initial_state : int, default=0
+        The initial state from which to start simulations.
+    n_runs : int, default=1
+        The number of rounds of adaptive sampling.
+    n_clones : int, default=1
+        The number of clones per run of adaptive sampling.
+    n_steps : int, default=1
+        The number of steps per clone (each trajectory).
+    msm_obj : enspara.msm.MSM object
+        An enspara MSM object. This is used to fit assignments at each
+        round of sampling.
+    ranking_obj : rankings object
+        This is an object with at least two functions: __init__(**args)
+        and select_states(msm, n_clones). The output of this object is
+        a list of states to simulate.
+
+    Returns
+    ----------
+    assignments : array, shape=(n_runs, n_clones, n_steps)
+       The assignments files for adaptive sampling runs.
+    """
+
     def __init__(
             self, T, initial_state, n_runs, n_clones, n_steps, msm_obj,
             ranking_obj):
+        # Initialize class variables
         self.T = T
         self.initial_state = initial_state
         self.n_runs = n_runs
@@ -77,7 +107,10 @@ class Adaptive_Sampling:
         self.ranking_obj = ranking_obj
 
     def run(self):
+        # initialize random seed. This is necessary for getting
+        # independent samplings through parallelization.
         np.random.seed()
+        # initialize first run
         assignments = []
         initial_assignments = np.array(
             [
@@ -85,8 +118,11 @@ class Adaptive_Sampling:
                     self.T, self.initial_state, self.n_steps)
                 for i in range(self.n_clones)])
         assignments.append(initial_assignments)
+        # iterate through each run and append assignments
         for run_num in range(1, self.n_runs):
+            # fit assignments with msm object
             self.msm_obj.fit(np.concatenate(assignments))
+            # rank states based on ranking object
             states_to_simulate = self.ranking_obj.select_states(
                 self.msm_obj, self.n_clones)
             new_assignments = np.array(
