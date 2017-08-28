@@ -9,6 +9,7 @@ def _run_sampling(adaptive_sampling_obj):
     assignments = adaptive_sampling_obj[0].run()
     return assignments
 
+
 def adaptive_sampling(
         T, initial_state=0, n_runs=1, n_clones=1, n_steps=1,
         msm_obj=None, ranking_obj=None, n_reps=1, n_procs=1):
@@ -45,7 +46,8 @@ def adaptive_sampling(
        The assignments files for adaptive sampling runs.
     """
     if msm_obj is None:
-        MSM(lag_time=1, method=builders.normalize, max_n_states=None)
+        msm_obj = MSM(
+            lag_time=1, method=builders.normalize, max_n_states=len(T))
     if ranking_obj is None:
         ranking_obj = rankings.min_counts()
         
@@ -85,12 +87,12 @@ class Adaptive_Sampling:
         assignments.append(initial_assignments)
         for run_num in range(1, self.n_runs):
             self.msm_obj.fit(np.concatenate(assignments))
-            state_to_simulate = self.ranking_obj.select_states(
+            states_to_simulate = self.ranking_obj.select_states(
                 self.msm_obj, self.n_clones)
             new_assignments = np.array(
                 [
                     synthetic_data.synthetic_trajectory(
-                        self.T, state_to_simulate[i], self.n_steps)
+                        self.T, states_to_simulate[i], self.n_steps)
                     for i in range(self.n_clones)])
             assignments.append(new_assignments)
         return assignments
