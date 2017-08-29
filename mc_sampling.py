@@ -49,8 +49,13 @@ def adaptive_sampling(
     if msm_obj is None:
         msm_obj = MSM(
             lag_time=1, method=builders.normalize, max_n_states=len(T))
+    if msm_obj.max_n_states != len(T):
+        print(
+            "MSM.max_n_states should be equal to the total number of" + \
+            "states. Changing value.")
+        msm_obj.max_n_states = len(T)
     if ranking_obj is None:
-        ranking_obj = rankings.min_counts()
+        ranking_obj = rankings.counts()
         
     sampling_info = list(
         zip(
