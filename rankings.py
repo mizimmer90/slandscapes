@@ -128,8 +128,8 @@ def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
     d : float
         The weight of page ranks [0, 1]. A value of 1 is pure page rank
         and 0 is all the initial ranks.
-    init_pops : bool, default=True
-        Optionally uses the populations within an MSM as the initial ranks.
+    Pi : array, default=None
+        The prior ranks.
     max_iters : int, default=100000
         The maximum number of iterations to check for convergence.
     norm : bool, default=True
