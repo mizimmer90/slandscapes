@@ -140,6 +140,7 @@ def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
     The rankings of each state
 
     """
+    N = float(aij.shape[0])
     # if Pi is None, set it to 1/total states
     if Pi is None:
         Pi = np.zeros(int(N))
@@ -230,7 +231,6 @@ class page_ranking(base_ranking):
         tcounts_sub = tcounts.tocsr()[:, unique_states][unique_states, :]
         aij = generate_aij(tcounts_sub)
         # determine the initial ranks
-        N = float(aij.shape[0])
         if self.init_pops:
             Pi = msm.eq_probs_[unique_states]
         else:
