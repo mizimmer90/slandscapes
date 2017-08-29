@@ -1,9 +1,12 @@
 import numpy as np
 import time
-import sys
 import scipy.sparse as spar
 from . import scalings
-from sklearn.preprocessing import normalize
+
+
+########################################################################
+#                           helper functions                           #
+########################################################################
 
 
 def _evens_select_states(msm, n_clones):
@@ -60,11 +63,143 @@ def get_unique_states(msm):
     return unique_states
 
 
-class page_ranking:
+########################################################################
+#                            page rankings                             #
+########################################################################
+
+
+def generate_aij(tcounts, spreading=False):
+    """Generates the adjacency matrix used for page ranking.
+
+    Parameters
+    ----------
+    tcounts : matrix, shape=(n_states, n_states)
+        The count matrix of an MSM. Can be dense or sparse.
+    spreading : bool, default=False
+        Optionally transposes matrix to do counts spreading instead of
+        page rank.
+
+    Returns
+    ----------
+    aij : matrix, shape=(n_states, n_states)
+        The adjacency matrix used for page ranking.
+
+    """
+    # check if sparse matrix
+    if not spar.isspmatrix(tcounts):
+        iis = np.where(tcounts != 0)
+        tcounts = spar.coo_matrix(
+            (tcounts[iis], iis), shape=(len(tcounts), len(tcounts)))
+    else:
+        tcounts = tcounts.tocoo()
+    # get row and col information
+    row_info = tcounts.row
+    col_info = tcounts.col
+    tcounts.data = np.zeros(len(tcounts.data)) + 1
+    tcounts.setdiag(0) # Sets diagonal to zero
+    tcounts = tcounts.tocsr()
+    tcounts.eliminate_zeros()
+    # optionally does spreading
+    if spreading:
+        tcounts = (tcounts + tcounts.T) / 2.
+        aij = normalize(tcounts, norm='l1', axis=1)
+    else:
+        # Set 0 connections to 1 (
+        # this doesn't change anything and avoids dividing by zero)
+        connections = tcounts.sum(axis = 1)
+        iis = np.where(connections == 0)
+        connections[iis] = 1
+        # Convert 1/Connections to sparse matrix format
+        connections = spar.coo_matrix(connections).data
+        con_len = len(connections)
+        iis = (np.array(range(con_len)), np.array(range(con_len)))
+        inv_connections = spar.coo_matrix(
+            (connections**-1, iis), shape=(con_len, con_len))
+        aij = tcounts.transpose() * inv_connections
+    return aij
+
+def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
+    """Ranks the adjacency matrix.
+    
+    Parameters
+    ----------
+    aij : matrix
+        The adjacency matrix used for ranking.
+    d : float
+        The weight of page ranks [0, 1]. A value of 1 is pure page rank
+        and 0 is all the initial ranks.
+    init_pops : bool, default=True
+        Optionally uses the populations within an MSM as the initial ranks.
+    max_iters : int, default=100000
+        The maximum number of iterations to check for convergence.
+    norm : bool, default=True
+        Normilizes output ranks
+
+    Returns
+    ----------
+    The rankings of each state
+
+    """
+    # if Pi is None, set it to 1/total states
+    if Pi is None:
+        Pi = np.zeros(int(N))
+        Pi[:] = 1/N
+    # set error for page ranks
+    error = 1 / N**5
+    # first pass of rankings
+    new_page_rank = (1 - d) * Pi + d * aij.dot(Pi)
+    pr_error = np.sum(np.abs(Pi - new_page_rank))
+    page_rank = new_page_rank
+    # iterate until error is below threshold
+    iters = 0
+    while pr_error > error:
+        new_page_rank = (1 - d) * Pi + d * aij.dot(page_rank)
+        pr_error = np.sum(np.abs(page_rank - new_page_rank))
+        page_rank = new_page_rank
+        iters += 1
+        # error out if does not converge
+        if iters > max_iters:
+            raise
+    # normalize rankings
+    if norm:
+        page_rank *= 100./page_rank.sum()
+    return page_rank
+
+
+########################################################################
+#                           ranking classes                            #
+########################################################################
+
+
+class base_ranking:
+    """base ranking class. Pieces out selection of states from
+    independent rankings"""
+
+    def __init__(self, maximize_ranking=True):
+        self.maximize_ranking = maximize_ranking
+
+    def select_states(self, msm, n_clones):
+        # determine discovered states from msm
+        unique_states = get_unique_states(msm)
+        # if not enough discovered states for selection of n_clones,
+        # selects states using the evens method
+        if len(unique_states) < n_clones:
+            states_to_simulate = _evens_select_states(msm, n_clones)
+        # selects the n_clones with minimum counts
+        else:
+            rankings = self.rank(msm, unique_states=unique_states)
+            states_to_simulate = _unbias_state_selection(
+                unique_states, rankings, n_clones,
+                select_max=self.maximize_ranking)
+        return states_to_simulate
+
+
+class page_ranking(base_ranking):
     """page ranking. ri = (1-d)*init_ranks + d*aij"""
+
     def __init__(
             self, d, init_pops=True, max_iters=100000, norm=True,
-            spreading=False):
+            spreading=False, maximize_ranking=True):
         """
         Parameters
         ----------
@@ -79,85 +214,35 @@ class page_ranking:
             Normilizes output ranks
         spreading : bool, default = False
             Solves for page ranks with the transpose of aij.
-
         """
         self.d = d
         self.init_pops = init_pops
         self.max_iters = max_iters
         self.norm = norm
         self.spreading = spreading
+        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
-    def generate_aij(self, tcounts):
-        if not spar.isspmatrix(tcounts):
-            iis = np.where(tcounts != 0)
-            tcounts = spar.coo_matrix(
-                (tcounts[iis], iis), shape=(len(tcounts), len(tcounts)))
-        else:
-            tcounts = tcounts.tocoo()
-        row_info = tcounts.row
-        col_info = tcounts.col
-        tcounts.data = np.zeros(len(tcounts.data)) + 1
-        tcounts.setdiag(0) # Sets diagonal to zero
-        tcounts = tcounts.tocsr()
-        tcounts.eliminate_zeros()
-        if self.spreading:
-            tcounts = (tcounts + tcounts.T) / 2.
-            aij = normalize(tcounts, norm='l1', axis=1)
-        else:
-            # Set 0 connections to 1 (
-            # this doesn't change anything and avoids dividing by zero)
-            connections = tcounts.sum(axis = 1)
-            iis = np.where(connections == 0)
-            connections[iis] = 1
-            # Convert 1/Connections to sparse matrix format
-            connections = spar.coo_matrix(connections).data
-            con_len = len(connections)
-            iis = (np.array(range(con_len)), np.array(range(con_len)))
-            inv_connections = spar.coo_matrix(
-                (connections**-1, iis), shape=(con_len, con_len))
-            aij = tcounts.transpose() * inv_connections
-        return aij
-
-    def rank(self, msm):
+    def rank(self, msm, unique_states=None):
         # generate aij matrix
+        if unique_states is None:
+            unique_states = get_unique_states(msm)
         tcounts = msm.tcounts_
-        unique_states = np.where(
-            np.array(tcounts.sum(axis=1)).flatten() > 0)[0]
         tcounts_sub = tcounts.tocsr()[:, unique_states][unique_states, :]
-        aij = self.generate_aij(tcounts_sub)
+        aij = generate_aij(tcounts_sub)
         # determine the initial ranks
         N = float(aij.shape[0])
         if self.init_pops:
-            initial_rank = msm.eq_probs_[unique_states]
+            Pi = msm.eq_probs_[unique_states]
         else:
-            initial_rank = np.zeros(int(N))
-            initial_rank[:] = 1/N
-        # set error for page ranks
-        error = 1 / N**5
-        # first pass of rankings
-        new_page_rank = (1 - self.d) * initial_rank + \
-            self.d * aij.dot(initial_rank)
-        pr_error = np.sum(np.abs(initial_rank - new_page_rank))
-        page_rank = new_page_rank
-        # iterate until error is below threshold
-        iters = 0
-        while pr_error > error:
-            new_page_rank = (1 - self.d) * initial_rank + \
-                self.d * aij.dot(page_rank)
-            pr_error = np.sum(np.abs(page_rank - new_page_rank))
-            page_rank = new_page_rank
-            iters += 1
-            # error out if does not converge
-            if iters > self.max_iters:
-                raise
-        # normalize rankings
-        if self.norm:
-            page_rank *= 100./page_rank.sum()
-        return page_rank
+            Pi = None
+        rankings = rank_aij(
+            aij, d=self.d, Pi=Pi, max_iters=self.max_iters, norm=self.norm)
+        return rankings
 
 
 class evens:
     """Evens ranking object"""
+
     def __init__(self):
         pass
 
@@ -165,34 +250,21 @@ class evens:
         return _evens_select_states(msm, n_clones)
 
 
-class counts:
+class counts(base_ranking):
     """Min-counts ranking object. Ranks states based on their raw
     counts."""
-    def __init__(self):
-        pass
 
+    def __init__(self, maximize_ranking=False):
+        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+    
     def rank(self, msm, unique_states=None):
         counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
         if unique_states is None:
             unique_states = np.where(counts_per_state > 0)[0]
         return counts_per_state[unique_states]
 
-    def select_states(self, msm, n_clones):
-        # determine discovered states from msm
-        unique_states = get_unique_states(msm)
-        counts_rankings = self.rank(msm, unique_states=unique_states)
-        # if not enough discovered states for selection of n_clones,
-        # selects states using the evens method
-        if len(unique_states) < n_clones:
-            states_to_simulate = _evens_select_states(msm, n_clones)
-        # selects the n_clones with minimum counts
-        else:
-            states_to_simulate = _unbias_state_selection(
-                unique_states, counts_rankings, n_clones, select_max=False)
-        return states_to_simulate
 
-
-class FAST:
+class FAST(base_ranking):
     """FAST ranking object"""
 
     def __init__(
@@ -200,7 +272,7 @@ class FAST:
             directed_scaling = scalings.feature_scale(maximize=True),
             statistical_component = counts(),
             statistical_scaling = scalings.feature_scale(maximize=False),
-            alpha = 1, alpha_percent=False):
+            alpha = 1, alpha_percent=False, maximize_ranking=True):
         """
         Parameters
         ----------
@@ -230,6 +302,7 @@ class FAST:
         self.alpha_percent = alpha_percent
         if self.alpha_percent and ((self.alpha < 0) or (self.alpha > 1)):
             raise
+        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
     def rank(self, msm, unique_states=None):
         # determine unique states
@@ -250,16 +323,3 @@ class FAST:
         else:
             total_rankings = directed_weights + self.alpha*statistical_weights
         return total_rankings        
-
-    def select_states(self, msm, n_clones):
-        # get the unique states and statistical rankings
-        unique_states = get_unique_states(msm)
-        if len(unique_states) < n_clones:
-            states_to_simulate = _evens_select_states(msm, n_clones)
-        # selects the n_clones with minimum counts
-        else:
-            total_rankings = self.rank(msm, unique_states=unique_states)
-            # unbias state selection
-            states_to_simulate = _unbias_state_selection(
-                unique_states, total_rankings, n_clones, select_max=True)
-        return states_to_simulate
