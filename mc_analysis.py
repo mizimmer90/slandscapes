@@ -73,11 +73,34 @@ def state_pathway_prob(
 
     return pathway_probs
 
-def discover_probabilities(assignments, n_states=None):
+
+def _condition_assignments(assignments, end_state):
+    """Chops each assignment off at round that state is discovered.
+    Also, it flattens the assignments."""
+    state_exists_iis = np.unique(np.where(assignments == end_state)[0])
+    conditioned_assignments = []
+    for ii in state_exists_iis:
+        cut = np.where(assignments[ii]==end_state)[0][0] + 1
+        conditioned_assignments.append(assignments[ii][:cut])
+    state_doesnt_exist_iis = np.setdiff1d(
+        np.arange(len(assignments)), state_exists_iis)
+    for ii in state_doesnt_exist_iis:
+        conditioned_assignments.append(assignments[ii])
+    flattened_assignments = np.array(
+        [ass.flatten() for ass in conditioned_assignments])
+    return flattened_assignments
+
+
+def discover_probabilities(assignments, n_states=None, end_state=None):
     """Returns the probability that a state is discovered from a set
-    of trajectories"""
+    of trajectories or sampling run (treats each row in assignments as
+    an independent sampling run for calculating probabilities)"""
     if n_states is None:
         n_states = np.max(np.concatenate(assignments))
+    if end_state is not None:
+        assignments = _condition_assignments(assignments, end_state)
+    if len(assignments.shape) > 2:
+        assignments = np.array([ass.flatten() for ass in assignments])
     observed_states = np.array(
         [
             np.bincount(ass, minlength=n_states) for ass in assignments]) > 0

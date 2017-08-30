@@ -172,6 +172,16 @@ def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
 ########################################################################
 
 
+class evens:
+    """Evens ranking object"""
+
+    def __init__(self):
+        pass
+
+    def select_states(self, msm, n_clones):
+        return _evens_select_states(msm, n_clones)
+
+
 class base_ranking:
     """base ranking class. Pieces out selection of states from
     independent rankings"""
@@ -240,16 +250,6 @@ class page_ranking(base_ranking):
         return rankings
 
 
-class evens:
-    """Evens ranking object"""
-
-    def __init__(self):
-        pass
-
-    def select_states(self, msm, n_clones):
-        return _evens_select_states(msm, n_clones)
-
-
 class counts(base_ranking):
     """Min-counts ranking object. Ranks states based on their raw
     counts."""
@@ -308,14 +308,17 @@ class FAST(base_ranking):
         # determine unique states
         if unique_states is None:
             unique_states = get_unique_states(msm)
-        # get statistical component
-        statistical_ranking = self.statistical_component.rank(msm)
+        if self.statistical_component is None:
+            statistical_weights = np.zeros(unique_states.shape)
+        else:
+            # get statistical component
+            statistical_ranking = self.statistical_component.rank(msm)
+            # scale the statistical weights
+            statistical_weights = self.statistical_scaling.scale(
+                statistical_ranking)
         # scale the directed weights
         directed_weights = self.directed_scaling.scale(
             self.state_rankings[unique_states])
-        # scale the statistical weights
-        statistical_weights = self.statistical_scaling.scale(
-            statistical_ranking)
         # determine rankings
         if self.alpha_percent:
             total_rankings = (1-self.alpha)*directed_weights + \
