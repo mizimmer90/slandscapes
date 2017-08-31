@@ -311,7 +311,9 @@ class landscape:
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=self.values+noise)
     def plot(self, title='potential energy landscape', **kwargs):
-        plt.figure(title)
+        plt.figure(
+            title, figsize=(
+                self.x1_coords.max()/self.x2_coords.max()*8, 8))
         plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
         plt.ylim((self.x2_coords[0,0], self.x2_coords[-1,0]))
         plt.pcolormesh(self.x1_coords, self.x2_coords, self.values, **kwargs)
