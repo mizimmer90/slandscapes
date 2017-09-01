@@ -107,7 +107,9 @@ class Adaptive_Sampling:
         self.initial_state = initial_state
         self.n_runs = n_runs
         self.n_clones = n_clones
-        self.n_steps = n_steps
+        # adds 1 to the number of steps. This is because synthetic
+        # trajectories counts number of states, not steps.
+        self.n_steps = n_steps + 1
         self.msm_obj = msm_obj
         self.ranking_obj = ranking_obj
 
