@@ -6,9 +6,10 @@ import os
 import pylab as plt
 from mdtraj import io
 
-#################################################
-#            format tpt path to grid            #
-#################################################
+#######################################################################
+#                   formating and plotting stuff                      #
+#######################################################################
+
 
 def _convert_path(path, n_states):
     dim = int(np.sqrt(n_states))
@@ -69,9 +70,16 @@ def plot_pijs(filenames, grid_size=None, output_names=None, state_num=None):
     plt.show()
     return
 
+
+#######################################################################
+#                         custom gaussians                            #
+#######################################################################
+
+
 def _gaussian(xs, a, b, c):
     f = a*np.exp(-((xs-b)**2) / (2 * (c**2)))
     return f
+
 
 def _gaussian_multD(xs, x0s, height=1, widths=1, normed=False):
     # check dim of a
@@ -104,54 +112,68 @@ def _gaussian_multD(xs, x0s, height=1, widths=1, normed=False):
     f = height*np.exp(-exponent)
     return f
 
+
 def gaussian_noise(
-        x1s, x2s, gaussians_per_axis=4, height_range=[-0.1,0.1],
+        x1s, x2s, gaussians_per_axis=None, height_range=[-0.1,0.1],
         width_range=[0.9,1.1], rigidity=0):
     """Given x1 coords and x2 coords, generates a specified number of evenly
        spaced gaussians along each axis of varying height and widths. The
        rigidity value determines how evenly spaced gaussians are (0 is loose
        and 1 is rigid)."""
+    if type(gaussians_per_axis) is int:
+        gaussians_per_axis = [gaussians_per_axis, gaussians_per_axis]
+    elif gaussians_per_axis is None:
+        gaussians_per_axis = [int(x1s.max()/2.), int(x2s.max()/2.)]
+    tot_gaussians = np.prod(gaussians_per_axis)
     # dimension info
     axis1 = x1s[0]
     axis2 = x2s[:,0]
-    box_length_1 = (axis1[-1]-axis1[0])/gaussians_per_axis
-    box_length_2 = (axis2[-1]-axis2[0])/gaussians_per_axis
-    box_centers_1 = (np.arange(gaussians_per_axis)*box_length_1) + (box_length_1/2.0)
-    box_centers_2 = (np.arange(gaussians_per_axis)*box_length_2) + (box_length_2/2.0)
+    box_length_1 = (axis1[-1]-axis1[0])/gaussians_per_axis[0]
+    box_length_2 = (axis2[-1]-axis2[0])/gaussians_per_axis[1]
+    box_centers_1 = (np.arange(gaussians_per_axis[0]) * box_length_1) + \
+        (box_length_1/2.0)
+    box_centers_2 = (np.arange(gaussians_per_axis[1]) * box_length_2) + \
+        (box_length_2/2.0)
     # generate rigid center coords
     centers = np.array(
-        list(itertools.product(box_centers_1,box_centers_2)))
+        list(itertools.product(box_centers_1, box_centers_2)))
     # heights
     height_spread = height_range[1] - height_range[0]
     heights = [
         height_spread * np.random.random() + height_range[0]
-        for n in range(gaussians_per_axis**2)]
+        for n in range(tot_gaussians)]
     # widths
     widths_spread = width_range[1] - width_range[0]
     widths = [
         widths_spread * np.random.random() + width_range[0]
-        for n in range(gaussians_per_axis**2)]
+        for n in range(tot_gaussians)]
     # rigid formula and initialize noise and xs
-    rigidity_div = 2 + (rigidity*4)**2
-    noise = np.zeros((len(axis1), len(axis2)))
+    rigidity_div = 2 + (rigidity * 4)**2
+    noise = np.zeros((len(axis2), len(axis1)))
     xs = np.array([x1s, x2s])
     # add gaussians
-    for num in range(gaussians_per_axis**2):
-        rand1 = np.random.random()-0.5
-        rand2 = np.random.random()-0.5
+    for num in range(tot_gaussians):
+        rand1 = np.random.random() - 0.5
+        rand2 = np.random.random() - 0.5
         center = [
-            centers[num, 0] + (box_length_1/rigidity_div)*rand1,
-            centers[num, 1] + (box_length_2/rigidity_div)*rand2]
+            centers[num, 0] + (box_length_1 / rigidity_div) * rand1,
+            centers[num, 1] + (box_length_2 / rigidity_div) * rand2]
         noise += _gaussian_multD(
             xs, center, height=heights[num], widths=widths[num])
     return noise
+
+
+#######################################################################
+#            converting landscape to a probability matrix             #
+#######################################################################
+
 
 def energies_to_probs(Aij, energies):
     """Given an adjacency matrix and a list of state energies,
     returns the corresponding transition probability matrix.
     """
     # test shape of Aij
-    fd,sd = Aij.shape
+    fd, sd = Aij.shape
     if fd != sd:
         print("Aij is not square!")
         raise
@@ -168,10 +190,11 @@ def energies_to_probs(Aij, energies):
         rates = np.minimum(
             np.ones(len(transitions)),
             np.exp(energies[state] - energies[transitions]))
-        probs[state,transitions] = rates
+        probs[state, transitions] = rates
     # norms the rates into transition probs
-    probs = probs/probs.sum(axis=1)[:,None]
+    probs = probs / probs.sum(axis=1)[:, None]
     return probs
+
 
 def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     """given a potential energy landscape (in the form of values for x1,
@@ -181,7 +204,7 @@ def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
        to generate a rate. Potential energy surface is in units of kT."""
     # identify number of states and resolution (points between states)
     n_states = grid_size[0]*grid_size[1]
-    states = np.arange(n_states).reshape(grid_size)
+    states = np.arange(n_states).reshape((grid_size[1],grid_size[0]))
     res = len(x1s[0])//grid_size[0]
     if adjust_centers:
         res_adjust = res//2
@@ -234,43 +257,50 @@ def surface_to_probs(x1s, x2s, surface, grid_size, adjust_centers=True):
     T /= T.sum(axis=1)[:,None]
     return T
 
-def funneled_landscape(grid_size, width_frac=0.707, depth=1, resolution=1):
-    l = landscape(grid_size=grid_size, resolution=resolution)
-    x0 = np.array([grid_size[0], grid_size[1]])
-    widths = x0*width_frac
-    l = l.add_gaussian(x0, height=-depth, widths=widths)
-    return l
 
-def diagonal_barrier(
-        grid_size, position=0.5, height=1, width=1, resolution=1):
-    l = landscape(grid_size=grid_size, resolution=resolution)
-    semi_circum = len(l.x1_coords)+len(l.x1_coords[0]) - 1
-    diag = int(semi_circum * position) - len(l.x1_coords)
-    centers = np.array(
-        list(
-            zip(
-                l.x1_coords[::-1].diagonal(diag),
-                l.x2_coords[::-1].diagonal(diag))))
-    for center in centers:
-        l = l.add_gaussian(x0s=center, height=height, widths=width)
-    return l
+def gen_aij(grid_size):
+    """Generate a lattice with an arbitrary shape. Returns state
+    numberings and the adjacency matrix."""
+    n_states = np.prod(grid_size)
+    states = np.arange(n_states)
+    l_states = states.reshape(grid_size)
+    iis = np.array(
+        [np.array(np.where(l_states==state)).flatten() for state in states])
+    aij = np.zeros((n_states, n_states), dtype=int)
+    for state in states:
+        diffs = iis - iis[state]
+        dists = np.einsum('ij,ij->i', diffs, diffs)
+        aij[state, np.where(dists<=1)[0]] = 1
+    return aij
 
-def egg_carton_landscape(
-        grid_size, gaussians_per_axis, height=1, width=1, resolution=1):
-    l = landscape(grid_size=grid_size, resolution=resolution)
-    l = l.add_noise(
-        gaussians_per_axis=gaussians_per_axis, height_range=[height, height],
-        width_range=[width, width], rigidity=100000)
-    return l
 
-def slant_landscape(
-        grid_size, gradient=1.0, resolution=1):
-    l = landscape(grid_size=grid_size, resolution=resolution)
-    l.values = np.array(
-        [np.arange(l.values.shape[1]) * gradient] * l.values.shape[0])
-    return l
+#######################################################################
+#                           landscape class                           #
+#######################################################################
+
 
 class landscape:
+    """Generation of a toy energy landscape.
+
+    Parameters
+    ----------
+    grid_size : tuple, defaut=None
+        The dimensions of the 2d landscape. i.e. for a landscape that
+        is 50x10, grid_size=(50,10).
+    x1_coords : array, shape=(grid_size[1], grid_size[0]), default=None
+        The x1 coordinates of a pre-made grid. Not needed for a grid
+        being initialized.
+    x2_coords : array, shape=(grid_size[1], grid_size[0]), default=None
+        The x2 coordinates of a pre-made grid. Not needed for a grid
+        being initialized.
+    values : array, shape=(grid_size[1], grid_size[0]), default=None
+        The energies at each grid point. Not needed for a grid being
+        initialized. If None, all values are set to 0.
+    resolution : int, default=1
+        The number of energies to include between states on the grid.
+        This serves as a type of resolution of the landscape.
+    """
+
     def __init__(
             self, grid_size=None,  x1_coords=None, x2_coords=None, values=None,
             resolution=1):
@@ -293,6 +323,7 @@ class landscape:
             self.x1_coords = x1_coords
             self.x2_coords = x2_coords
             self.values = values
+
     def add_gaussian(self, x0s, height=1, widths=1):
         input_coords = np.array([self.x1_coords, self.x2_coords])
         new_values = self.values + _gaussian_multD(
@@ -300,8 +331,9 @@ class landscape:
         return landscape(
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=new_values)
+
     def add_noise(
-            self, gaussians_per_axis, height_range=[-0.1, 0.1],
+            self, gaussians_per_axis=None, height_range=[-0.1, 0.1],
             width_range=[0.85, 1.15], rigidity=0):
         noise = gaussian_noise(
             self.x1_coords, self.x2_coords,
@@ -310,14 +342,21 @@ class landscape:
         return landscape(
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=self.values+noise)
-    def plot(self, title='potential energy landscape', **kwargs):
-        plt.figure(title)
+
+    def plot(
+            self, title='potential energy landscape', cmap='seismic',
+            **kwargs):
+        plt.figure(
+            title, figsize=(
+                self.x1_coords.max()/self.x2_coords.max()*10, 8))
         plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
         plt.ylim((self.x2_coords[0,0], self.x2_coords[-1,0]))
-        plt.pcolormesh(self.x1_coords, self.x2_coords, self.values, **kwargs)
+        plt.pcolormesh(
+            self.x1_coords, self.x2_coords, self.values, cmap=cmap, **kwargs)
         plt.colorbar()
         plt.show()
         return
+
     def save_fig(self, output_name, title='potential energy landscape'):
         plt.figure(title)
         plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
@@ -326,10 +365,12 @@ class landscape:
         plt.colorbar()
         plt.savefig(output_name)
         plt.show()
+
     def to_probs(self):
         T = surface_to_probs(
             self.x1_coords, self.x2_coords, self.values, self.grid_size)
         return T
+
     def save(self, output_name, txt=False, txt_fmt='%d %d %d %f'):
         if txt:
             x1_coords_flat = self.x1_coords.flatten()
@@ -348,6 +389,7 @@ class landscape:
                 'x2_coords' : self.x2_coords,
                 'landscape' : self.values}
             io.saveh(output_name, **output_dict)
+
     def load(input_name):
         load_dict = io.loadh(input_name)
         x1_coords = load_dict['x1_coords']
@@ -355,5 +397,4 @@ class landscape:
         values = load_dict['landscape']
         return landscape(
             x1_coords=x1_coords, x2_coords=x2_coords, values=values)
-
 
