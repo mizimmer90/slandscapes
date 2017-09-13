@@ -80,8 +80,12 @@ def _condition_assignments(assignments, end_state):
     state_exists_iis = np.unique(np.where(assignments == end_state)[0])
     conditioned_assignments = []
     for ii in state_exists_iis:
-        cut = np.where(assignments[ii]==end_state)[0][0] + 1
-        conditioned_assignments.append(assignments[ii][:cut])
+        if (len(assignments.shape) == 4) and (assignments.shape[1:3] == (1,1)):
+            cut = np.where(assignments[ii]==end_state)[-1][0] + 1
+            conditioned_assignments.append(assignments[ii, 0, 0, :cut])
+        else:
+            cut = np.where(assignments[ii]==end_state)[0][0] + 1
+            conditioned_assignments.append(assignments[ii, :cut])
     state_doesnt_exist_iis = np.setdiff1d(
         np.arange(len(assignments)), state_exists_iis)
     for ii in state_doesnt_exist_iis:
@@ -96,8 +100,8 @@ def discover_probabilities(assignments, n_states=None, end_state=None):
     of trajectories or sampling run (treats each row in assignments as
     an independent sampling run for calculating probabilities)"""
     if n_states is None:
-        n_states = np.max(np.concatenate(assignments))
-    if end_state is not None:
+        n_states = np.max(np.flatten(assignments))
+    if end_state is not None and assignments.shape:
         assignments = _condition_assignments(assignments, end_state)
     if len(assignments.shape) > 2:
         assignments = np.array([ass.flatten() for ass in assignments])

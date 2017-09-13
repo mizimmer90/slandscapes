@@ -1,3 +1,5 @@
+import enspara.tpt
+import msmbuilder.tpt
 import numpy as np
 import time
 import scipy.sparse as spar
@@ -9,13 +11,11 @@ from . import scalings
 ########################################################################
 
 
-def _evens_select_states(msm, n_clones):
+
+def _evens_select_states(unique_states, n_clones):
     """Helper function for evens state selection. Picks among all
     discovered states evenly. If more states were discovered than
     clones, randomly picks remainder states."""
-    # determine discovered states from msm
-    counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
-    unique_states = np.where(counts_per_state > 0)[0]
     # calculate the number of clones per state and the balance to
     # match n_clones
     clones_per_state = int(n_clones / len(unique_states))
@@ -48,7 +48,7 @@ def _unbias_state_selection(states, rankings, n_selections, select_max=True):
     # this is done upto n_selections
     tot_state_count = 0
     for ranking_num in unique_rankings:
-        iis = np.where(sorted_rankings == ranking_num)
+        iis = np.where(sorted_rankings == ranking_num)[0]
         sorted_states[iis] = sorted_states[np.random.permutation(iis)]
         tot_state_count += len(iis)
         if tot_state_count > n_selections:
@@ -118,6 +118,7 @@ def generate_aij(tcounts, spreading=False):
         aij = tcounts.transpose() * inv_connections
     return aij
 
+
 def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
     """Ranks the adjacency matrix.
     
@@ -179,7 +180,8 @@ class evens:
         pass
 
     def select_states(self, msm, n_clones):
-        return _evens_select_states(msm, n_clones)
+        unique_states = get_unique_states(msm)
+        return _evens_select_states(unique_states, n_clones)
 
 
 class base_ranking:
@@ -195,13 +197,20 @@ class base_ranking:
         # if not enough discovered states for selection of n_clones,
         # selects states using the evens method
         if len(unique_states) < n_clones:
-            states_to_simulate = _evens_select_states(msm, n_clones)
+            states_to_simulate = _evens_select_states(unique_states, n_clones)
         # selects the n_clones with minimum counts
         else:
             rankings = self.rank(msm, unique_states=unique_states)
-            states_to_simulate = _unbias_state_selection(
-                unique_states, rankings, n_clones,
-                select_max=self.maximize_ranking)
+            # if a state-ranking is `nan`, does not consider it in rankings.
+            non_nan_rank_iis = np.where(1 - np.isnan(rankings))[0]
+            # if not enought non-`nan` states are discivered, performs evens
+            if len(non_nan_rank_iis) < n_clones:
+                states_to_simulate = _evens_select_states(
+                    unique_states[non_nan_rank_iis], n_clones)
+            else:
+                states_to_simulate = _unbias_state_selection(
+                    unique_states[non_nan_rank_iis], rankings[non_nan_rank_iis],
+                    n_clones, select_max=self.maximize_ranking)
         return states_to_simulate
 
 
@@ -325,4 +334,57 @@ class FAST(base_ranking):
                 self.alpha*statistical_weights
         else:
             total_rankings = directed_weights + self.alpha*statistical_weights
-        return total_rankings        
+        return total_rankings
+
+
+class string(base_ranking):
+    """Uses the string method with MSMs to relax pathway. Samples from
+    states along the highest flux pathway between start-states and
+    end-states. Uses the statistical component to rank the states on
+    this pathway.
+
+    Parameters
+    ----------
+    start_states : int or array-like, shape = (n_start_states, )
+        The starting states for defining the pathway.
+    end_states : int of array-like, shape = (n_end_states, )
+        The ending states for defining the pathway.
+    statistical_component : ranking function
+        A ranking class object to rank the pathway states. If none is
+        selected, evens is used.
+    """
+    def __init__(
+            self, start_states, end_states, statistical_component=None,
+            maximize_ranking=False):
+        self.start_states = start_states
+        self.end_states = end_states
+        self.statistical_component = statistical_component
+        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+
+    def rank(self, msm, unique_states=None):
+        # determine unique states
+        if unique_states is None:
+            unique_states = get_unique_states(msm)
+        if self.statistical_component is None:
+            statistical_ranking = np.zeros(unique_states.shape)
+        else:
+            # get statistical component
+            statistical_ranking = self.statistical_component.rank(msm)
+        # determine the highest flux pathway between states
+        nfm = enspara.tpt.net_fluxes(
+            np.array(msm.tprobs_.todense()), self.start_states,
+            self.end_states, populations=msm.eq_probs_)
+        path, flux = msmbuilder.tpt.top_path(
+            self.start_states, self.end_states, nfm)
+        # make all non-pathway states `nan`
+        path_states = np.unique(path.flatten())
+        path_iis = np.array(
+            [
+                np.where(unique_states == path_state)[0][0]
+                for path_state in path])
+        non_path_iis = np.setdiff1d(range(len(unique_states)), path_iis)
+        new_rankings = np.copy(statistical_ranking)
+        new_rankings[non_path_iis] = None
+        return new_rankings
+
+

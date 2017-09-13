@@ -13,7 +13,8 @@ def _run_sampling(adaptive_sampling_obj):
 
 def adaptive_sampling(
         T, initial_state=0, n_runs=1, n_clones=1, n_steps=1,
-        msm_obj=None, ranking_obj=None, n_reps=1, n_procs=1):
+        msm_obj=None, ranking_obj=None, n_reps=1, n_procs=1,
+        assignments=None):
     """Get synthetic adaptive sampling run from an MSM
 
     Parameters
@@ -40,6 +41,8 @@ def adaptive_sampling(
     n_procs : int, default=1
         The number of processes to use when doing adaptive sampling.
         This parallelizes over the number of reps.
+    assignments : array-like, shape = (n_trajs, n_steps), default=None
+        Optionally provide assignments to continue sampling from.
 
     Returns
     ----------
@@ -62,12 +65,12 @@ def adaptive_sampling(
             itertools.repeat(
                 Adaptive_Sampling(
                     T, initial_state, n_runs, n_clones, n_steps, msm_obj,
-                    ranking_obj),
+                    ranking_obj, assignments),
                 n_reps)))
     pool = Pool(processes = n_procs)
-    assignments = pool.map(_run_sampling, sampling_info)
+    new_assignments = pool.map(_run_sampling, sampling_info)
     pool.terminate()
-    return np.array(assignments)
+    return np.array(new_assignments)
 
 
 class Adaptive_Sampling:
@@ -92,6 +95,10 @@ class Adaptive_Sampling:
         This is an object with at least two functions: __init__(**args)
         and select_states(msm, n_clones). The output of this object is
         a list of states to simulate.
+    assignments : array-like, shape = (n_trajs, n_steps), default=None
+        Optionally provide assignments to continue sampling from. If
+        using previous assignments, number of steps for each trajectory
+        must be the same.
 
     Returns
     ----------
@@ -101,7 +108,7 @@ class Adaptive_Sampling:
 
     def __init__(
             self, T, initial_state, n_runs, n_clones, n_steps, msm_obj,
-            ranking_obj):
+            ranking_obj, assignments=None):
         # Initialize class variables
         self.T = T
         self.initial_state = initial_state
@@ -112,6 +119,17 @@ class Adaptive_Sampling:
         self.n_steps = n_steps + 1
         self.msm_obj = msm_obj
         self.ranking_obj = ranking_obj
+        # format initial assignments if present
+        if assignments is not None:
+            if len(assignments.shape) == 2:
+                pass
+            elif len(assignments.shape) == 3:
+                pass
+            elif (len(assignments.shape) == 4) and (assignments.shape[0] == 1):
+                assignments = np.concatenate(assignments)
+            else:
+                raise
+        self.starting_assignments = assignments
 
     def run(self):
         # initialize random seed. This is necessary for getting
@@ -119,14 +137,28 @@ class Adaptive_Sampling:
         np.random.seed()
         # initialize first run
         assignments = []
-        initial_assignments = np.array(
-            [
-                synthetic_data.synthetic_trajectory(
-                    self.T, self.initial_state, self.n_steps)
-                for i in range(self.n_clones)])
-        assignments.append(initial_assignments)
+        if self.starting_assignments is None:
+            initial_assignments = np.array(
+                [
+                    synthetic_data.synthetic_trajectory(
+                        self.T, self.initial_state, self.n_steps)
+                    for i in range(self.n_clones)])
+            assignments.append(initial_assignments)
+            # If there are no starting assignments, gets initial
+            # assignments from initial state and this counts as a single
+            # run of adaptive sampling.
+            run_start = 1
+        else:
+            # checks if previous assignments have multiple runs (purely
+            # for the formatting of output)
+            if len(self.starting_assignments.shape) == 3:
+                for assignment in self.starting_assignments:
+                    assignments.append(assignment)
+            else:
+                assignments.append(self.starting_assignments)
+            run_start = 0
         # iterate through each run and append assignments
-        for run_num in range(1, self.n_runs):
+        for run_num in range(run_start, self.n_runs):
             # fit assignments with msm object
             self.msm_obj.fit(np.concatenate(assignments))
             # rank states based on ranking object
