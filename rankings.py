@@ -371,8 +371,12 @@ class string(base_ranking):
             # get statistical component
             statistical_ranking = self.statistical_component.rank(msm)
         # determine the highest flux pathway between states
+        if spar.issparse(msm.tprobs_):
+            tprobs = np.array(msm.tprobs_.todense())
+        else:
+            tprobs = msm.tprobs_
         nfm = enspara.tpt.net_fluxes(
-            np.array(msm.tprobs_.todense()), self.start_states,
+            tprobs, self.start_states,
             self.end_states, populations=msm.eq_probs_)
         path, flux = msmbuilder.tpt.top_path(
             self.start_states, self.end_states, nfm)
