@@ -2,6 +2,7 @@ import itertools
 import numpy as np
 from . import rankings
 from enspara.msm import builders, MSM, synthetic_data
+from functools import partial
 from multiprocessing import Pool
 
 
@@ -50,8 +51,9 @@ def adaptive_sampling(
        The assignments files for adaptive sampling runs.
     """
     if msm_obj is None:
+        builder_obj = partial(builders.normalize, calculate_eq_probs=False)
         msm_obj = MSM(
-            lag_time=1, method=builders.normalize, max_n_states=len(T))
+            lag_time=1, method=builder_obj, max_n_states=len(T))
     if msm_obj.max_n_states != len(T):
         print(
             "MSM.max_n_states should be equal to the total number of" + \
