@@ -26,5 +26,3 @@ class sigmoid_scale:
             scaled_values = 1-(1 - (1+(((2**(self.a/self.b)) - 1)*((values/sigma)**self.a)))**(-self.b/self.a))
         return scaled_values
 
-
-
