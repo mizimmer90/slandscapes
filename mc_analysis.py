@@ -74,7 +74,7 @@ def state_pathway_prob(
     return pathway_probs
 
 
-def _condition_assignments(assignments, end_state):
+def _condition_assignments(assignments, end_state, flatten=True):
     """Chops each assignment off at round that state is discovered.
     Also, it flattens the assignments."""
     state_exists_iis = np.unique(np.where(assignments == end_state)[0])
@@ -90,9 +90,13 @@ def _condition_assignments(assignments, end_state):
         np.arange(len(assignments)), state_exists_iis)
     for ii in state_doesnt_exist_iis:
         conditioned_assignments.append(assignments[ii])
-    flattened_assignments = np.array(
-        [ass.flatten() for ass in conditioned_assignments])
-    return flattened_assignments
+    if flatten:
+        flattened_assignments = np.array(
+            [ass.flatten() for ass in conditioned_assignments])
+        assignments_out = flattened_assignments
+    else:
+        assignments_out = conditioned_assignments
+    return assignments_out
 
 
 def discover_probabilities(assignments, n_states=None, end_state=None):

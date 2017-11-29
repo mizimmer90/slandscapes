@@ -179,6 +179,11 @@ class evens:
     def __init__(self):
         pass
 
+    def rank(self, msm):
+        unique_states = get_unique_states(msm)
+        return np.zeros(len(unique_states))
+        
+
     def select_states(self, msm, n_clones):
         unique_states = get_unique_states(msm)
         return _evens_select_states(unique_states, n_clones)
@@ -355,10 +360,11 @@ class string(base_ranking):
     """
     def __init__(
             self, start_states, end_states, statistical_component=None,
-            maximize_ranking=False):
+            n_paths=1, maximize_ranking=False):
         self.start_states = start_states
         self.end_states = end_states
         self.statistical_component = statistical_component
+        self.n_paths = n_paths
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
     def rank(self, msm, unique_states=None):
@@ -378,14 +384,14 @@ class string(base_ranking):
         nfm = enspara.tpt.net_fluxes(
             tprobs, self.start_states,
             self.end_states, populations=msm.eq_probs_)
-        path, flux = msmbuilder.tpt.top_path(
-            self.start_states, self.end_states, nfm)
+        paths, fluxes = msmbuilder.tpt.paths(
+            self.start_states, self.end_states, nfm, num_paths=self.n_paths)
         # make all non-pathway states `nan`
-        path_states = np.unique(path.flatten())
+        path_states = np.unique(np.concatenate(paths))
         path_iis = np.array(
             [
                 np.where(unique_states == path_state)[0][0]
-                for path_state in path])
+                for path_state in path_states])
         non_path_iis = np.setdiff1d(range(len(unique_states)), path_iis)
         new_rankings = np.copy(statistical_ranking)
         new_rankings[non_path_iis] = None
