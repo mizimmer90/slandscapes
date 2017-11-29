@@ -11,6 +11,11 @@ from . import scalings
 ########################################################################
 
 
+def euclidean_dist(centers, frame):
+    diffs = centers - frame
+    dists = np.sqrt(np.einsum('ij,ij->i', diffs, diffs))
+    return dists
+
 
 def _evens_select_states(unique_states, n_clones):
     """Helper function for evens state selection. Picks among all
@@ -55,6 +60,35 @@ def _unbias_state_selection(states, rankings, n_selections, select_max=True):
             break
     return sorted_states[:n_selections]
 
+
+def _select_states_spreading(
+        rankings, unique_states, n_clones, centers, distance_metric,
+        select_max=True, width=1.0, non_overlap=True):
+    states_to_simulate = [
+        _unbias_state_selection(
+            unique_states, rankings, 1, select_max=select_max)[0]]
+    dist_list = []
+    for num in range(n_clones-1):
+        dist_list.append(
+            distance_metric(
+                centers[unique_states], centers[states_to_simulate[-1]]))
+        gaussian_weights = np.sum(
+            [
+                (1 - np.exp(-(dists**2)/float(2.0*(width**2))))
+                for dists in dist_list], axis=0) / len(dist_list)
+        new_rankings = rankings + gaussian_weights
+        if non_overlap:
+            states_to_zero = np.array(
+                [
+                    np.where(unique_states == state)[0]
+                    for state in states_to_simulate])
+            new_rankings[states_to_zero] = 0
+        states_to_simulate.append(
+            _unbias_state_selection(
+                unique_states, new_rankings, 1, select_max=select_max)[0])
+    states_to_simulate = np.array(states_to_simulate)
+    return states_to_simulate
+                
 
 def get_unique_states(msm):
     """returns a list of the visited states within an msm object"""
@@ -193,8 +227,12 @@ class base_ranking:
     """base ranking class. Pieces out selection of states from
     independent rankings"""
 
-    def __init__(self, maximize_ranking=True):
+    def __init__(
+            self, maximize_ranking=True, state_centers=None,
+            distance_metric=None):
         self.maximize_ranking = maximize_ranking
+        self.state_centers = state_centers
+        self.distance_metric = distance_metric
 
     def select_states(self, msm, n_clones):
         # determine discovered states from msm
@@ -213,9 +251,18 @@ class base_ranking:
                 states_to_simulate = _evens_select_states(
                     unique_states[non_nan_rank_iis], n_clones)
             else:
-                states_to_simulate = _unbias_state_selection(
-                    unique_states[non_nan_rank_iis], rankings[non_nan_rank_iis],
-                    n_clones, select_max=self.maximize_ranking)
+                if (self.state_centers is None) or (self.distance_metric is None):
+                    states_to_simulate = _unbias_state_selection(
+                        unique_states[non_nan_rank_iis],
+                        rankings[non_nan_rank_iis], n_clones,
+                        select_max=self.maximize_ranking)
+                else:
+                    states_to_simulate = _select_states_spreading(
+                        rankings[non_nan_rank_iis],
+                        unique_states[non_nan_rank_iis], n_clones,
+                        centers=self.state_centers,
+                        distance_metric=self.distance_metric,
+                        select_max=self.maximize_ranking)
         return states_to_simulate
 
 
@@ -224,7 +271,7 @@ class page_ranking(base_ranking):
 
     def __init__(
             self, d, init_pops=True, max_iters=100000, norm=True,
-            spreading=False, maximize_ranking=True):
+            spreading=False, maximize_ranking=True, **kwargs):
         """
         Parameters
         ----------
@@ -245,7 +292,8 @@ class page_ranking(base_ranking):
         self.max_iters = max_iters
         self.norm = norm
         self.spreading = spreading
-        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+        base_ranking.__init__(
+            self, maximize_ranking=maximize_ranking, **kwargs)
 
     def rank(self, msm, unique_states=None):
         # generate aij matrix
@@ -268,8 +316,9 @@ class counts(base_ranking):
     """Min-counts ranking object. Ranks states based on their raw
     counts."""
 
-    def __init__(self, maximize_ranking=False):
-        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+    def __init__(self, maximize_ranking=False, **kwargs):
+        base_ranking.__init__(
+            self, maximize_ranking=maximize_ranking, **kwargs)
     
     def rank(self, msm, unique_states=None):
         counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
@@ -286,7 +335,8 @@ class FAST(base_ranking):
             directed_scaling = scalings.feature_scale(maximize=True),
             statistical_component = counts(),
             statistical_scaling = scalings.feature_scale(maximize=False),
-            alpha = 1, alpha_percent=False, maximize_ranking=True):
+            alpha = 1, alpha_percent=False, maximize_ranking=True,
+            **kwargs):
         """
         Parameters
         ----------
@@ -316,7 +366,8 @@ class FAST(base_ranking):
         self.alpha_percent = alpha_percent
         if self.alpha_percent and ((self.alpha < 0) or (self.alpha > 1)):
             raise
-        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+        base_ranking.__init__(
+            self, maximize_ranking=maximize_ranking, **kwargs)
 
     def rank(self, msm, unique_states=None):
         # determine unique states
@@ -360,12 +411,13 @@ class string(base_ranking):
     """
     def __init__(
             self, start_states, end_states, statistical_component=None,
-            n_paths=1, maximize_ranking=False):
+            n_paths=1, maximize_ranking=False, **kwargs):
         self.start_states = start_states
         self.end_states = end_states
         self.statistical_component = statistical_component
         self.n_paths = n_paths
-        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+        base_ranking.__init__(
+            self, maximize_ranking=maximize_ranking, **kwargs)
 
     def rank(self, msm, unique_states=None):
         # determine unique states
