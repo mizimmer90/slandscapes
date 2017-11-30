@@ -1,6 +1,8 @@
 import numpy as np
 
 def _get_reactive_path(assignment, sinks, source=None):
+    """Given a trajectory, determines the string of states that goes
+    from the source to the sink"""
     if source is None:
         source = assignment[0]
 
@@ -24,7 +26,8 @@ def _get_reactive_path(assignment, sinks, source=None):
 
 
 def reactive_pathways(assignments, sinks, source=None, verbose=False):
-    """
+    """Given a set of trajectories, determines all the reactive
+    pathways, i.e. the trajectories of going from source to sink.
     """
     sinks = np.array(sinks).reshape((-1,))
     pathways = np.array(
@@ -43,7 +46,11 @@ def reactive_pathways(assignments, sinks, source=None, verbose=False):
 
 def reactive_density(
         assignments, sinks, source=None, all_reactive=False, verbose=False):
-    """
+    """The probability of being in a particular state when in a
+    reactive pathway between sources and sinks. `all_reactive` is a flag
+    to indicate whether all the trajectories supplied are reactive or
+    not; this can save time processing the assignments for reactive
+    parts.
     """
     if not all_reactive:
         pathways = reactive_pathways(assignments, sinks, verbose=verbose)
@@ -59,7 +66,11 @@ def reactive_density(
 
 def state_pathway_prob(
         assignments, sinks, source=None, all_reactive=False, verbose=False):
-    """
+    """The probability that a state is observed along a reactive pathway
+    between source and sink. This is different from reactive density in
+    that the density accounts for how much time is spent in a state
+    along a reactive trajectory. Instead, this returns the probability
+    that a state is ever reactive.
     """
     if not all_reactive:
         pathways = reactive_pathways(assignments, sinks, verbose=verbose)
