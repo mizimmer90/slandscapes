@@ -4,7 +4,7 @@ import numpy as np
 import time
 import scipy.sparse as spar
 from . import scalings
-
+import scipy.optimize as optimization
 
 ########################################################################
 #                           helper functions                           #
@@ -62,6 +62,23 @@ def get_unique_states(msm):
     unique_states = np.unique(np.nonzero(tcounts)[0])
     return unique_states
 
+
+def update_alpha(old_alpha,assignments,a,b):
+    """Updates alpha based on the coefficient of the parabola formed
+    from the cumulative states discovered, looking only at last 3 rounds."""
+    x0 = np.array([1.0,1.0,1.0])
+    x_points = np.array([1.0,2.0,3.0])
+    y_points = np.array([len(np.unique(assignments[:-20,:])),
+                            len(np.unique(assignments[:-10,:])),
+                               len(np.unique(assignments[:,:]))
+                                   ])
+    coeff_max = 105 #Hard-coded for testing purposes
+    parab_coeff = ((y_points[2] - y_points[1]) - (y_points[1] - y_points[0])) / 2
+    shifted_parab_coeff = parab_coeff + coeff_max 
+    norm_parab_coeff = (1/(coeff_max*2) * shifted_parab_coeff)
+    new_alpha = (1 - (1+(((2**(a/b)) - 1)*((norm_parab_coeff/0.5)**a)))**(-b/a))
+    alpha = 0.8*new_alpha + 0.2*old_alpha
+    return alpha    
 
 ########################################################################
 #                            page rankings                             #
@@ -147,7 +164,7 @@ def rank_aij(aij, d=0.85, Pi=None, max_iters=100000, norm=True):
         Pi = np.zeros(int(N))
         Pi[:] = 1/N
     # set error for page ranks
-    error = 1 / N**5
+    error = 1 / N**2
     # first pass of rankings
     new_page_rank = (1 - d) * Pi + d * aij.dot(Pi)
     pr_error = np.sum(np.abs(Pi - new_page_rank))
@@ -191,7 +208,7 @@ class base_ranking:
     def __init__(self, maximize_ranking=True):
         self.maximize_ranking = maximize_ranking
 
-    def select_states(self, msm, n_clones):
+    def select_states(self, msm, n_clones, assignments):
         # determine discovered states from msm
         unique_states = get_unique_states(msm)
         # if not enough discovered states for selection of n_clones,
@@ -200,7 +217,7 @@ class base_ranking:
             states_to_simulate = _evens_select_states(unique_states, n_clones)
         # selects the n_clones with minimum counts
         else:
-            rankings = self.rank(msm, unique_states=unique_states)
+            rankings = self.rank(msm, unique_states=unique_states, assignments=assignments)
             # if a state-ranking is `nan`, does not consider it in rankings.
             non_nan_rank_iis = np.where(1 - np.isnan(rankings))[0]
             # if not enought non-`nan` states are discivered, performs evens
@@ -242,7 +259,7 @@ class page_ranking(base_ranking):
         self.spreading = spreading
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
-    def rank(self, msm, unique_states=None):
+    def rank(self, msm, unique_states=None, **kwargs):
         # generate aij matrix
         if unique_states is None:
             unique_states = get_unique_states(msm)
@@ -266,7 +283,7 @@ class counts(base_ranking):
     def __init__(self, maximize_ranking=False):
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
     
-    def rank(self, msm, unique_states=None):
+    def rank(self, msm, unique_states=None, **kwargs):
         counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
         if unique_states is None:
             unique_states = np.where(counts_per_state > 0)[0]
@@ -313,7 +330,7 @@ class FAST(base_ranking):
             raise
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
-    def rank(self, msm, unique_states=None):
+    def rank(self, msm, unique_states=None, **kwargs):
         # determine unique states
         if unique_states is None:
             unique_states = get_unique_states(msm)
@@ -334,6 +351,67 @@ class FAST(base_ranking):
                 self.alpha*statistical_weights
         else:
             total_rankings = directed_weights + self.alpha*statistical_weights
+        return total_rankings
+
+class FAST_adaptive(base_ranking):
+    """FAST ranking object"""
+
+    def __init__(
+            self, state_rankings,
+            directed_scaling = scalings.feature_scale(maximize=True),
+            statistical_component = counts(),
+            statistical_scaling = scalings.feature_scale(maximize=False),
+            maximize_ranking=True, alpha = 0.5, a=35, b=50):
+        """
+        Parameters
+        ----------
+        state_rankings : array, shape = (n_states, )
+            An array with ranking values for each state. This is
+            previously calculated for each state in the MSM.
+        directed_scaling : scaling object, default = feature_scale(maximize=True)
+            An object used for scaling the directed component values.
+        statistical_component : ranking function
+            A function that has an enspara msm object as input, and
+            returns the unique states and statistical rankings per
+            state.
+        statistical_scaling : scaling object, default = feature_scale(maximize=False)
+            An object used for scaling the statistical component values.
+        alpha : float, default = 1
+            The weighting of the statistical component to FAST.
+            i.e. r_i = directed + alpha * undirected
+        alpha_percent : bool, default=False
+            Optionally treat the alpha value as a percent.
+            i.e. r_i = (1 - alpha) * directed + alpha * undirected
+        """
+        self.state_rankings = state_rankings
+        self.directed_scaling = directed_scaling
+        self.statistical_component = statistical_component
+        self.statistical_scaling = statistical_scaling
+        self.alpha = alpha
+        self.a = a
+        self.b = b
+        base_ranking.__init__(self, maximize_ranking=maximize_ranking)
+
+    def rank(self, msm, unique_states=None,assignments=None):
+        #if _above_round4(assignments):
+        #    self.alpha = _update_alpha(self.alpha, assignments)
+        concat_assignments = np.concatenate(assignments[:])
+        #This will only work for 10 n_clones
+        if concat_assignments.shape[0] > 20:
+           self.alpha = update_alpha(self.alpha, concat_assignments,self.a,self.b)
+        # determine unique states
+        if unique_states is None:
+            unique_states = get_unique_states(msm)
+        # get statistical component
+        statistical_ranking = self.statistical_component.rank(msm)
+        # scale the statistical weights
+        statistical_weights = self.statistical_scaling.scale(
+                statistical_ranking)
+        # scale the directed weights
+        directed_weights = self.directed_scaling.scale(
+            self.state_rankings[unique_states])
+        total_rankings = (1-self.alpha)*directed_weights + \
+                self.alpha*statistical_weights
         return total_rankings
 
 
@@ -361,7 +439,7 @@ class string(base_ranking):
         self.statistical_component = statistical_component
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
-    def rank(self, msm, unique_states=None):
+    def rank(self, msm, unique_states=None,**kwargs):
         # determine unique states
         if unique_states is None:
             unique_states = get_unique_states(msm)

@@ -165,7 +165,7 @@ class Adaptive_Sampling:
             self.msm_obj.fit(np.concatenate(assignments))
             # rank states based on ranking object
             states_to_simulate = self.ranking_obj.select_states(
-                self.msm_obj, self.n_clones)
+                self.msm_obj, self.n_clones,assignments)
             new_assignments = np.array(
                 [
                     synthetic_data.synthetic_trajectory(
