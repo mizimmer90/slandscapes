@@ -449,8 +449,6 @@ class FAST_adaptive(base_ranking):
         base_ranking.__init__(self, maximize_ranking=maximize_ranking)
 
     def rank(self, msm, unique_states=None,assignments=None):
-        #if _above_round4(assignments):
-        #    self.alpha = _update_alpha(self.alpha, assignments)
         concat_assignments = np.concatenate(assignments[:])
         #This will only work for 10 n_clones
         if concat_assignments.shape[0] > 20:
