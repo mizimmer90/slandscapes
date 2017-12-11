@@ -172,4 +172,5 @@ class Adaptive_Sampling:
                         self.T, states_to_simulate[i], self.n_steps)
                     for i in range(self.n_clones)])
             assignments.append(new_assignments)
+        assignments = np.array(assignments)
         return assignments
