@@ -357,6 +357,70 @@ class landscape:
         plt.show()
         return
 
+    def cplot(
+            self, title='potential energy landscape', cmap='RdYlBu_r',
+            n_bins=10, show_plot=True, grid=True, **kwargs):
+        # get X, Y, and Z coords
+        X = self.x1_coords
+        Y = self.x2_coords
+        Z = self.values
+        # setup figure
+        fig = plt.figure(
+            title, figsize=(
+                self.x1_coords.max()/self.x2_coords.max()*10, 8))
+        ax = fig.add_subplot(1,1,1)
+        # get appropriate levels
+        try:
+            levels = kwargs['levels']
+            kwargs = removekey(kwargs,'levels')
+            try:
+                norm = kwargs['norm']
+                if type(norm) is type(colors.LogNorm()):
+                    tick_values = np.logspace(
+                        start=np.log10(np.min(levels)),
+                        stop=np.log10(np.max(levels)),
+                        num=len(levels), base=10.0)
+                else:
+                    raise
+            except:
+                tick_values = np.linspace(
+                    start=np.min(levels),
+                    stop=np.max(levels),
+                    num=len(levels))
+        except:
+            try:
+                # test if norm exists
+                norm = kwargs['norm']
+                if type(norm) is type(colors.LogNorm()):
+                    levels = np.logspace(
+                        #Z.min(), Z.max(), nbins, endpoint=True)
+                        start=np.log10(Z.min()),
+                        stop=np.log10(Z.max()),
+                        num=n_bins, base=10.0)
+                else:
+                    levels = mpl.ticker.MaxNLocator(n_bins=n_bins).tick_values(Z.min(), Z.max())
+            except:
+                levels = mpl.ticker.MaxNLocator(n_bins=n_bins).tick_values(Z.min(), Z.max())
+            tick_values = np.linspace(Z.min(), Z.max(), len(levels))
+
+        CS = ax.contourf(
+            X, Y, Z, cmap=cmap, levels=levels, origin='lower', zorder=0, **kwargs)
+        if grid:
+            # set grid
+            intervals = 1
+            loc = plticker.MultipleLocator(base=intervals)
+            ax.yaxis.set_major_locator(loc)
+            ax.xaxis.set_major_locator(loc)
+            plt.grid('on', linestyle='-', linewidth=1, color='black', zorder=1)
+        # make colorbar
+        fig.subplots_adjust(right=0.8)
+        cbar_ax = fig.add_axes([0.82, 0.15, 0.02, 0.7])
+        cb = fig.colorbar(CS, cax=cbar_ax, ticks=levels)
+        cb.ax.set_yticklabels([str(i) for i in tick_values])
+        if show_plot:
+            plt.show()
+        return fig, ax
+
     def save_fig(self, output_name, title='potential energy landscape'):
         plt.figure(title)
         plt.xlim((self.x1_coords[0,0], self.x1_coords[0,-1]))
@@ -397,4 +461,10 @@ class landscape:
         values = load_dict['landscape']
         return landscape(
             x1_coords=x1_coords, x2_coords=x2_coords, values=values)
+
+def removekey(d, key):
+    r = dict(d)
+    del r[key]
+    return r
+
 
