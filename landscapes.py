@@ -1,9 +1,12 @@
 import collections
 import glob
 import itertools
+import matplotlib.colors as colors
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.ticker as plticker
 import numpy as np
 import os
-import pylab as plt
 from mdtraj import io
 
 #######################################################################
