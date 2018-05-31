@@ -82,7 +82,10 @@ def _select_states_spreading(
                 [
                     np.where(unique_states == state)[0]
                     for state in states_to_simulate])
-            new_rankings[states_to_zero] = 0
+            if select_max:
+                new_rankings[states_to_zero] = 0
+            else:
+                new_rankings[states_to_zero] = np.inf
         states_to_simulate.append(
             _unbias_state_selection(
                 unique_states, new_rankings, 1, select_max=select_max)[0])
@@ -318,7 +321,9 @@ class counts(base_ranking):
     """Min-counts ranking object. Ranks states based on their raw
     counts."""
 
-    def __init__(self, maximize_ranking=False, **kwargs):
+    def __init__(
+            self, maximize_ranking=False, scaling=None, **kwargs):
+        self.scaling = scaling
         base_ranking.__init__(
             self, maximize_ranking=maximize_ranking, **kwargs)
     
@@ -326,7 +331,10 @@ class counts(base_ranking):
         counts_per_state = np.array(msm.tcounts_.sum(axis=1)).flatten()
         if unique_states is None:
             unique_states = np.where(counts_per_state > 0)[0]
-        return counts_per_state[unique_states]
+        counts_return = counts_per_state[unique_states]
+        if self.scaling is not None:
+            counts_return = self.scaling.scale(counts_return)
+        return counts_return
 
 
 class FAST(base_ranking):
@@ -413,7 +421,7 @@ class string(base_ranking):
     """
     def __init__(
             self, start_states, end_states, statistical_component=None,
-            n_paths=1, maximize_ranking=False, **kwargs):
+            n_paths=1, maximize_ranking=True, **kwargs):
         self.start_states = start_states
         self.end_states = end_states
         self.statistical_component = statistical_component
@@ -447,8 +455,8 @@ class string(base_ranking):
                 np.where(unique_states == path_state)[0][0]
                 for path_state in path_states])
         non_path_iis = np.setdiff1d(range(len(unique_states)), path_iis)
-        new_rankings = np.copy(statistical_ranking)
-        new_rankings[non_path_iis] = None
+        new_rankings = np.array(np.copy(statistical_ranking), dtype=float)
+        new_rankings[non_path_iis] = np.nan
         return new_rankings
 
 
