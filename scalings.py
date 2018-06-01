@@ -12,3 +12,17 @@ class feature_scale:
         else:
             scaled_values = (values.max() - values) / value_spread
         return scaled_values
+
+
+class sigmoid_scale:
+    def __init__(self, maximize=True, a=3):
+        self.maximize = maximize
+        self.a = a
+
+    def scale(self, values):
+        sigma = np.median(values)
+        sig_scale = (1 + ((values/sigma)**self.a))**-1
+        if self.maximize:
+            sig_scale = 1 - sig_scale
+        return sig_scale
+
