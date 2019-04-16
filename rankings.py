@@ -1,5 +1,5 @@
 import enspara.tpt
-import msmbuilder.tpt
+#import msmbuilder.tpt
 import numpy as np
 import time
 import scipy.sparse as spar

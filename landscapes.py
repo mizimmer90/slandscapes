@@ -276,6 +276,33 @@ def gen_aij(grid_size):
         aij[state, np.where(dists<=1)[0]] = 1
     return aij
 
+#######################################################################
+#                           helper function                           #
+#######################################################################
+
+# from: https://gist.github.com/nim65s/5e9902cd67f094ce65b0
+def point_seg_dist(A, B, P):
+    """ segment line AB, point P, where each one is an array([x, y]) """
+    if all(A == P) or all(B == P):
+        return 0
+    if np.arccos(np.dot((P - A) / np.linalg.norm(P - A), (B - A) / np.linalg.norm(B - A))) > np.pi / 2:
+        return np.linalg.norm(P - A)
+    if np.arccos(np.dot((P - B) / np.linalg.norm(P - B), (A - B) / np.linalg.norm(A - B))) > np.pi / 2:
+        return np.linalg.norm(P - B)
+    return np.linalg.norm(np.cross(A-B, A-P))/np.linalg.norm(B-A)
+
+def draw_line(angle,dist,x0,y0):
+    angle_r = np.deg2rad(angle)
+    slope = np.tan(angle_r)
+    cos = 1 / np.sqrt(1+slope**2)
+    sin = slope / np.sqrt(1+slope**2)
+    if angle < 90 or angle > 270:
+        x1 = x0 + dist*cos
+        y1 = y0 + dist*sin
+    elif angle > 90 and angle < 270:
+        x1 = x0 - dist*cos
+        y1 = y0 - dist*sin
+    return x1, y1
 
 #######################################################################
 #                           landscape class                           #
@@ -334,6 +361,25 @@ class landscape:
         return landscape(
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=new_values)
+
+    def add_barrier(self,height=3,width=3,start=(0,0),dist=5,angle=90):
+        '''Changes values in place and returns end point of barrier drawn'''
+        y0 = start[0]
+        x0 = start[1]
+        # Avoid infinite slope
+        if angle in [0,90,180,270,360]:
+            angle += 0.01
+        x1,y1 = draw_line(angle,dist,x0,y0)
+        p1 = np.array([y0,x0])
+        p2 = np.array([y1,x1])
+        #Line segment distance to all grid points - SHOULD VECTORIZE
+        for i in range(self.values.shape[0]):
+            for j in range(self.values.shape[1]):
+                p3 = np.array([i,j])
+                dist_to_line = point_seg_dist(p1,p2,p3)
+                if dist_to_line < (width / 2.5):
+                    self.values[i,j] += height
+        return [int(y1),int(x1)]
 
     def add_noise(
             self, gaussians_per_axis=None, height_range=[-0.1, 0.1],
