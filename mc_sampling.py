@@ -1,9 +1,59 @@
 import itertools
 import numpy as np
+import scipy
 from . import rankings
 from enspara.msm import builders, MSM, synthetic_data
 from functools import partial
 from multiprocessing import Pool
+
+def synthetic_conv(T, start_state, n_steps, end_state=None):
+    """Simulate a single trajectory using kinetic Monte Carlo.
+
+    Parameters
+    ----------
+    T : array, shape=(n_states, n_states)
+        A row-normalized transition probability matrix.
+    start_state : int
+        State to start the trajectory from.
+    n_steps : int
+        Number of steps in the trajectory. This includes the starting state,
+        so n_steps=2 would result in a trajectory consisting of the starting
+        state and one additional state.
+
+    Returns
+    -------
+    traj : array, shape=(n_steps, )
+        A 1-D array containing a sequence of state indices (integers).
+    """
+    np.random.seed()
+    if end_state:
+        traj = np.array([start_state])
+    else:
+        traj = -1*np.ones(n_steps, dtype=int)
+        traj[0] = start_state
+
+    for i in range(n_steps-1):
+        current_state = traj[i]
+        if scipy.sparse.isspmatrix(T):
+            p = T[current_state, :].toarray()[0]
+        else:
+            p = T[current_state, :]
+        new_state = np.where(scipy.random.multinomial(1, p) == 1)[0][0]
+        if end_state:
+            traj = np.append(traj,new_state)
+            if end_state == new_state:
+                break
+        else:
+            traj[i+1] = new_state
+
+    return traj
+
+def conv_sim(T, start_state, n_steps, n_cores, n_reps, end_state=None):
+    p = Pool(processes = n_cores)
+    inputs = list(itertools.repeat((T, start_state, n_steps, end_state), n_reps))
+    assignments = p.starmap(synthetic_conv, inputs)
+    p.close()
+    return assignments
 
 
 def _run_sampling(adaptive_sampling_obj):
