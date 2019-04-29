@@ -362,7 +362,7 @@ class landscape:
             grid_size=self.grid_size, x1_coords=self.x1_coords,
             x2_coords=self.x2_coords, values=new_values)
 
-    def add_barrier(self,height=3,width=3,start=(0,0),dist=5,angle=90):
+    def add_barrier(self,height=3,width=3,start=(0,0),dist=5,angle=90,draw=True):
         '''Changes values in place and returns end point of barrier drawn'''
         y0 = start[0]
         x0 = start[1]
@@ -372,14 +372,17 @@ class landscape:
         x1,y1 = draw_line(angle,dist,x0,y0)
         p1 = np.array([y0,x0])
         p2 = np.array([y1,x1])
+        points = []
         #Line segment distance to all grid points - SHOULD VECTORIZE
         for i in range(self.values.shape[0]):
             for j in range(self.values.shape[1]):
                 p3 = np.array([i,j])
                 dist_to_line = point_seg_dist(p1,p2,p3)
                 if dist_to_line < (width / 2.5):
-                    self.values[i,j] += height
-        return [int(y1),int(x1)]
+                    points.append(p3)
+                    if draw:
+                        self.values[i,j] += height
+        return points
 
     def add_noise(
             self, gaussians_per_axis=None, height_range=[-0.1, 0.1],

@@ -85,14 +85,14 @@ def rugged_landscape(grid_size=(100,30),
                      noise=True,
                      funneled=False,
                      backtrack=False,
-                     b_height=4,
-                     b_width=3,
+                     b_height=20,
+                     b_width=2,
                      instructions={'rand':5}):
     x_dim = grid_size[0]
     y_dim = grid_size[1]
     l = landscape(grid_size)
     if noise:
-        l = l.add_noise(gaussians_per_axis=int(0.5*y_dim),height_range=[b_height/2,b_height/2],width_range=[-1,1])
+        l = l.add_noise(gaussians_per_axis=int(0.5*y_dim),height_range=[0.5,0.5],width_range=[-2,2])
     if funneled:
         l = l.add_gaussian(np.array([0,y_dim/2]),height=3.5,widths=np.array([30,50]))
     #Add in barriers
@@ -116,17 +116,16 @@ def rugged_landscape(grid_size=(100,30),
         #randomly generated barriers at random locations
         elif key == 'random':
             #Distribution to draw barrier segment lengths from
-            mu_d = np.min(grid_size) / 3
+            mu_d = np.min(grid_size) / 2.8
             sig_d = np.min(grid_size) / 10
             num_barrs = instructions[key]
+            all_barrs = []
             for b in range(num_barrs):
-                #num_sides = np.random.choice(5, 1, p=[0, 0.12, 0.3, 0.5, 0.08])[0]
                 y = np.random.randint(y_dim)
-                x = np.random.randint(b*(x_dim/num_barrs),(b+1)*(x_dim/num_barrs))
-                #x = np.random.randint(x_dim)
+                x = np.random.randint(b*(x_dim/num_barrs),(b+1)*(x_dim/num_barrs)) #along x-axis
                 start = [y,x]
-                height = np.random.normal(b_height,1,1)[0]
-                width = np.random.normal(b_width,1,1)[0]
+                #height = np.random.normal(b_height,1,1)[0]
+                #width = np.random.normal(b_width,1,1)[0]
                 dist = np.random.normal(mu_d,sig_d, 1)[0]                            
                 angle = np.random.randint(360)
                 if backtrack and np.random.random(1)[0] > 0.95:
@@ -138,5 +137,9 @@ def rugged_landscape(grid_size=(100,30),
                     else:
                         angle = np.random.randint(290,320)
                         print(angle,start)
-                start = l.add_barrier(height=height,width=width,start=start,dist=dist,angle=angle)
+                points = l.add_barrier(height=b_height,width=b_width,start=start,dist=dist,angle=angle,draw=False)
+                all_barrs.append(points)
+            uniq_barrs = np.unique(np.concatenate(all_barrs),axis=0)
+            for p in uniq_barrs:
+                l.values[p[0],p[1]] = b_height
     return l
