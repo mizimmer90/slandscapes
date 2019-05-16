@@ -85,8 +85,10 @@ def rugged_landscape(grid_size=(100,30),
                      noise=True,
                      funneled=False,
                      backtrack=False,
+                     diagonals=False,
                      b_height=20,
                      b_width=2,
+                     b_length=1,
                      instructions={'rand':5}):
     x_dim = grid_size[0]
     y_dim = grid_size[1]
@@ -116,18 +118,22 @@ def rugged_landscape(grid_size=(100,30),
         #randomly generated barriers at random locations
         elif key == 'random':
             #Distribution to draw barrier segment lengths from
-            mu_d = np.min(grid_size) / 2.8
-            sig_d = np.min(grid_size) / 10
+            mu_d = (np.min(grid_size) / 3) * b_length
+            sig_d = (np.min(grid_size) / 5) * b_length
             num_barrs = instructions[key]
             all_barrs = []
+            x_spacing = x_dim / num_barrs
             for b in range(num_barrs):
                 y = np.random.randint(y_dim)
-                x = np.random.randint(b*(x_dim/num_barrs),(b+1)*(x_dim/num_barrs)) #along x-axis
+                x = np.random.randint(b*(x_spacing),(b+1)*(x_spacing)) #along x-axis
                 start = [y,x]
                 #height = np.random.normal(b_height,1,1)[0]
                 #width = np.random.normal(b_width,1,1)[0]
-                dist = np.random.normal(mu_d,sig_d, 1)[0]                            
-                angle = np.random.randint(360)
+                dist = np.random.normal(mu_d,sig_d, 1)[0]
+                if diagonals:
+                    angle = np.random.randint(360)
+                else:
+                    angle = np.random.choice([0,90,180,270])
                 if backtrack and np.random.random(1)[0] > 0.95:
                     # make the barrier long enough to definitely reach edge
                     dist = y_dim
